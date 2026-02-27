@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from nio import AsyncClient, RoomMessageText, SyncResponse
+from nio.api import RoomPreset
 from nio.responses import JoinResponse
 from .config import Config
 from .storage import Storage, Message, Conversation
@@ -149,32 +150,28 @@ class MatrixBackend:
     async def _get_or_create_room(self, to_vox_id: str, conversation_id: str) -> str:
         """Get or create a Matrix room for a conversation."""
         try:
-            # For simplicity, create a new room each time
-            # In production, would maintain room_id -> conversation_id mapping
-            
-            # Create new room with minimal config for Conduit compatibility
+            # Resolve the full Matrix user ID for the recipient
+            if ":" in to_vox_id:
+                target_user_id = to_vox_id if to_vox_id.startswith("@") else f"@{to_vox_id}"
+            else:
+                server_domain = self.config.homeserver.replace('http://', '').replace('https://', '').split(':')[0]
+                target_user_id = f"@{to_vox_id}:{server_domain}"
+
             response = await self.client.room_create(
                 name=f"Vox: {conversation_id}",
-                preset="private_chat"
+                preset=RoomPreset.private_chat,
+                invite=[target_user_id],
             )
             
             if hasattr(response, 'room_id'):
-                # Invite the other agent
-                server_domain = self.config.homeserver.replace('http://', '').replace('https://', '').split(':')[0]
-                await self.client.room_invite(
-                    room_id=response.room_id,
-                    user_id=f"@{to_vox_id}:{server_domain}"
-                )
                 return response.room_id
             else:
-                # Fallback: try to use response directly if it's a room_id string
                 if isinstance(response, str):
                     return response
                 else:
                     raise Exception(f"Failed to create room: {response}")
         except Exception as e:
             print(f"Room creation error: {e}")
-            # For demo purposes, return a fake room ID
             return f"!demo_{conversation_id}:localhost"
     
     def _extract_contact_from_room(self, room_id: str, messages: List[Message]) -> str:
